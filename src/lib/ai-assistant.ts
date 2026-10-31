@@ -7,6 +7,7 @@
  */
 
 import { prisma } from './db';
+import { AI_CONFIG } from './ai-config';
 
 if (typeof process !== 'undefined') {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
@@ -125,15 +126,15 @@ export async function askMunafaCopilot(question: string, context: any = {}): Pro
   const budgetRupees = Math.round(budgetPaise / 100);
   const salesTodayRupees = Math.round(totalSalesTodayPaise / 100);
 
-  // 2. Attempt Claude Sonnet 4.6 via VyceAI
-  const baseUrl = (process.env.AI_BASE_URL || 'https://vyceai.com/v1').replace(/\/+$/, '');
-  const apiKey = process.env.AI_API_KEY;
-  const model = process.env.AI_MODEL || 'claude-sonnet-4-6';
+  // 2. Attempt Claude Sonnet 4.6 via VyceAI (Hardcoded credentials with env overrides)
+  const baseUrl = AI_CONFIG.baseUrl;
+  const apiKey = AI_CONFIG.apiKey;
+  const model = AI_CONFIG.model;
 
   if (apiKey) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 1800); // 1.8s max wait
+      const timeoutId = setTimeout(() => controller.abort(), 4500); // 4.5s wait for Claude Sonnet 4.6
 
       const productContext = allProducts
         .slice(0, 20)

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { SAMPLE_BILL_FIXTURES } from '@/lib/bill-fixtures';
+import { AI_CONFIG } from '@/lib/ai-config';
 import { createWorker } from 'tesseract.js';
 import path from 'path';
 
@@ -58,10 +59,10 @@ export async function POST(req: Request) {
       const cleanBase64 = imageBase64.replace(/^data:image\/[a-z]+;base64,/, '');
       const imageBuffer = Buffer.from(cleanBase64, 'base64');
 
-      // Attempt 1: Claude Sonnet 4.6 / GPT-4o Vision via VyceAI (when deployed or network unblocked)
-      const apiKey = process.env.AI_API_KEY;
-      const baseUrl = (process.env.AI_BASE_URL || 'https://vyceai.com/v1').replace(/\/+$/, '');
-      const model = process.env.AI_MODEL || 'claude-sonnet-4-6';
+      // Attempt 1: Claude Sonnet 4.6 Vision via VyceAI (Hardcoded credentials with env overrides)
+      const apiKey = AI_CONFIG.apiKey;
+      const baseUrl = AI_CONFIG.baseUrl;
+      const model = AI_CONFIG.model;
 
       if (apiKey) {
         try {

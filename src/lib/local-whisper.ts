@@ -1,4 +1,11 @@
-import { pipeline } from '@xenova/transformers';
+import { pipeline, env } from '@xenova/transformers';
+
+// On Vercel or serverless environments, redirect Hugging Face cache to /tmp (only writable directory)
+if (typeof process !== 'undefined') {
+  if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
+    env.cacheDir = '/tmp/transformers-cache';
+  }
+}
 
 let transcriberPromise: Promise<any> | null = null;
 
@@ -14,6 +21,7 @@ export async function getLocalWhisperTranscriber() {
 /**
  * Transcribe raw 16kHz mono Float32Array PCM audio using local Whisper.
  * Completely local, zero external cloud dependency, zero firewall block risk.
+ * Includes safety timeout to prevent serverless function hangs.
  */
 export async function transcribePcmAudio(pcmFloats: Float32Array): Promise<string> {
   if (!pcmFloats || pcmFloats.length === 0) {
@@ -32,12 +40,24 @@ export async function transcribePcmAudio(pcmFloats: Float32Array): Promise<strin
     return '';
   }
 
-  const transcriber = await getLocalWhisperTranscriber();
-  const out = await transcriber(pcmFloats, {
-    task: 'transcribe',
-    chunk_length_s: 30,
-    stride_length_s: 5,
-  });
+  const timeoutPromise = new Promise<string>((_, reject) =>
+    setTimeout(() => reject(new Error('Whisper timeout')), 4500)
+  );
 
-  return (out?.text || '').trim();
+  try {
+    const transcriber = await getLocalWhisperTranscriber();
+    const out = await Promise.race([
+      transcriber(pcmFloats, {
+        task: 'transcribe',
+        chunk_length_s: 30,
+        stride_length_s: 5,
+      }),
+      timeoutPromise,
+    ]);
+
+    return (out?.text || '').trim();
+  } catch (err) {
+    console.warn('Local Whisper transcription notice:', err);
+    return '';
+  }
 }

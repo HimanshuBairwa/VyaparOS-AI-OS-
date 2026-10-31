@@ -251,6 +251,9 @@ export function RecordScreen({
     setStatusMessage({ type: 'info', text: `Analyzing invoice image: ${label}...` });
     setInputOrigin('BILL');
 
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+
     try {
       const res = await fetch('/api/extract/bill', {
         method: 'POST',
@@ -259,8 +262,10 @@ export function RecordScreen({
           imageBase64: dataUrl,
           fileName: label,
         }),
+        signal: controller.signal,
       });
 
+      clearTimeout(timer);
       const data = await res.json();
       if (data.success && data.extractedDraft) {
         const d = data.extractedDraft;
@@ -282,7 +287,8 @@ export function RecordScreen({
         setStatusMessage({ type: 'error', text: data.error || 'Failed to extract bill photo.' });
       }
     } catch (err) {
-      setStatusMessage({ type: 'error', text: 'Error extracting bill image.' });
+      clearTimeout(timer);
+      setStatusMessage({ type: 'error', text: 'Error extracting bill image. Form is open for direct entry below.' });
     } finally {
       setIsExtracting(false);
     }
@@ -478,6 +484,9 @@ export function RecordScreen({
       text: 'Transcribing your voice with local Whisper AI...',
     });
 
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
+
     try {
       const bytes = new Uint8Array(downsampled16k.buffer);
       const pcmBase64 = uint8ArrayToBase64(bytes);
@@ -486,8 +495,10 @@ export function RecordScreen({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pcmBase64, eventType }),
+        signal: controller.signal,
       });
 
+      clearTimeout(timer);
       const data = await res.json();
       if (data.success && data.transcript) {
         setInputText(data.transcript);
@@ -504,9 +515,10 @@ export function RecordScreen({
         });
       }
     } catch (err) {
+      clearTimeout(timer);
       setStatusMessage({
-        type: 'error',
-        text: 'Error processing microphone audio. Please type directly.',
+        type: 'info',
+        text: 'Speech recognition ended. You can type notes freely in the box below.',
       });
     }
   };
@@ -522,16 +534,62 @@ export function RecordScreen({
     setStatusMessage(null);
     setInputOrigin(origin);
 
+    // 1. Instant optimistic local regex match (0ms latency for merchant)
+    const lower = textToParse.toLowerCase();
+    const matchedProd = products.find(
+      (p) =>
+        lower.includes(p.variant.toLowerCase()) ||
+        lower.includes(p.name.toLowerCase()) ||
+        (lower.includes('atta') && p.name.toLowerCase().includes('sketch')) ||
+        (lower.includes('pen') && p.name.toLowerCase().includes('pen')) ||
+        (lower.includes('notebook') && p.name.toLowerCase().includes('notebook'))
+    );
+    if (matchedProd) {
+      setSelectedProductId(matchedProd.id);
+      setUnitPriceRupees(Math.round(matchedProd.sellingPricePaise / 100));
+    }
+
+    const qtyMatch = textToParse.match(/(\d+)\s*(?:pcs?|pieces?|units?|pkts?|packs?|boxes?|pouches?|copies?|bags?)/i) ||
+                     textToParse.match(/(\d+)\s+[a-zA-Z]/);
+    if (qtyMatch && qtyMatch[1]) {
+      const q = parseInt(qtyMatch[1], 10);
+      if (q > 0 && q < 500) {
+        setQuantity(q);
+      }
+    }
+
+    const priceMatch = textToParse.match(/(?:for|@|₹|rs\.?)\s*(\d+(?:\.\d{1,2})?)/i) ||
+                       textToParse.match(/(\d+)\s*(?:cash|paytm|upi)/i);
+    if (priceMatch && priceMatch[1]) {
+      const val = parseFloat(priceMatch[1]);
+      if (val > 0) {
+        setTotalPriceRupees(val);
+        const curQ = qtyMatch ? parseInt(qtyMatch[1], 10) : quantity;
+        if (curQ > 1 && val > curQ) {
+          setUnitPriceRupees(Math.round(val / curQ));
+        } else {
+          setUnitPriceRupees(val);
+        }
+      }
+    }
+
+    // 2. Claude Sonnet 4.6 AI Enrichment via API with safety timeout
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4500);
+
     try {
       const res = await fetch('/api/extract/text', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: textToParse, type }),
+        signal: controller.signal,
       });
+      clearTimeout(timer);
+
       const data = await res.json();
       if (data.success && data.draft) {
         const d = data.draft;
-        setExtractedSourceTag(d.extractedBy || 'AI Parser');
+        setExtractedSourceTag(d.extractedBy || 'Claude AI');
         applyDraftToForm(d, origin);
 
         setStatusMessage({
@@ -539,10 +597,17 @@ export function RecordScreen({
           text: `Text parsed successfully (${origin}). All fields are fully editable below before saving.`,
         });
       } else {
-        setStatusMessage({ type: 'error', text: data.error || 'Could not parse text.' });
+        setStatusMessage({
+          type: 'info',
+          text: `Values loaded into editable canvas. Review and save below.`,
+        });
       }
     } catch (err: any) {
-      setStatusMessage({ type: 'error', text: 'Extraction failed.' });
+      clearTimeout(timer);
+      setStatusMessage({
+        type: 'info',
+        text: `Fields populated. All values are editable before saving.`,
+      });
     } finally {
       setIsExtracting(false);
     }

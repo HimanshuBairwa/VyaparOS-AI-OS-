@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { AI_CONFIG } from '@/lib/ai-config';
 
 if (typeof process !== 'undefined') {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
@@ -21,9 +22,9 @@ const ExtractTextSchema = z.object({
 });
 
 async function tryLlmExtraction(text: string, type: 'QUOTE' | 'DEMAND' | 'SALE', catalog: CatalogProductRef[], suppliers: SupplierRef[]) {
-  const baseUrl = process.env.AI_BASE_URL || 'https://vyceai.com/v1';
-  const apiKey = process.env.AI_API_KEY;
-  const model = process.env.AI_MODEL || 'claude-sonnet-4-6';
+  const baseUrl = AI_CONFIG.baseUrl;
+  const apiKey = AI_CONFIG.apiKey;
+  const model = AI_CONFIG.model;
 
   const catalogOptions = catalog.map((c) => `${c.name} (${c.variant}) [ID: ${c.id}]`).join(', ');
   const supplierOptions = suppliers.map((s) => `${s.name} [ID: ${s.id}]`).join(', ');
