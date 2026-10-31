@@ -19,7 +19,7 @@ export async function seedDatabase() {
   // 1. Create Merchant
   const merchant = await prisma.merchant.create({
     data: {
-      name: 'Munafa Universal Retail Mart',
+      name: 'VyaparOS Universal Retail Mart',
       tagline: 'Aaj kya khareedun, kitna, aur kyun?',
       category: 'general_retail',
       currency: 'INR',

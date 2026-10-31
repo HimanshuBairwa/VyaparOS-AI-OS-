@@ -55,18 +55,18 @@ export function Navbar({
     <header className="sticky top-0 z-40 bg-white border-b border-stone-200 shadow-xs">
       <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-6">
         <div className="flex items-center justify-between h-16 gap-1 sm:gap-3">
-          {/* Brand Mark: VyaparOS AI (Munafa AI) */}
+          {/* Brand Mark: VyaparOS AI */}
           <div className="flex items-center space-x-2 shrink-0">
-            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-teal-700 to-emerald-700 text-white flex items-center justify-center font-black text-base sm:text-lg shadow-sm">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-teal-700 via-emerald-700 to-slate-900 text-white flex items-center justify-center font-black text-base sm:text-lg shadow-sm">
               V
             </div>
             <div>
-              <div className="font-extrabold text-sm sm:text-base text-slate-900 tracking-tight leading-none flex items-center gap-1">
+              <div className="font-extrabold text-sm sm:text-base text-slate-900 tracking-tight leading-none flex items-center gap-1.5">
                 <span>VyaparOS AI</span>
-                <span className="text-[10px] text-stone-400 font-normal hidden xl:inline">(Munafa AI)</span>
+                <span className="text-[10px] bg-teal-100 text-teal-800 px-1.5 py-0.5 rounded font-bold hidden sm:inline">व्यापारOS</span>
               </div>
               <div className="text-[10px] text-teal-700 font-bold tracking-wide mt-0.5 truncate max-w-[130px] sm:max-w-none">
-                Universal Retail Copilot
+                Autonomous Retail Copilot
               </div>
             </div>
           </div>

@@ -41,7 +41,7 @@ export async function transcribePcmAudio(pcmFloats: Float32Array): Promise<strin
   }
 
   const timeoutPromise = new Promise<string>((_, reject) =>
-    setTimeout(() => reject(new Error('Whisper timeout')), 4500)
+    setTimeout(() => reject(new Error('Whisper timeout')), 18000)
   );
 
   try {

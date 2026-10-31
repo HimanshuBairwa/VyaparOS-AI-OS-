@@ -354,7 +354,7 @@ export function PaytmSoundboxModal({ isOpen, onClose, onDataChanged }: PaytmSoun
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
                 <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2 flex items-center">
                   <ShieldCheck className="w-4 h-4 text-teal-600 mr-1.5" />
-                  Paytm Merchant Growth Loop in Munafa AI
+                  Paytm Merchant Growth Loop in VyaparOS AI
                 </h4>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-slate-600">
                   <div className="p-3 bg-white rounded-lg border border-slate-200">

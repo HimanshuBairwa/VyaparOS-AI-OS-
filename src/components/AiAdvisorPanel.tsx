@@ -153,7 +153,7 @@ export function AiAdvisorPanel({
           </div>
           <div>
             <h3 className="text-sm font-bold tracking-wide flex items-center gap-2">
-              <span>Munafa AI Copilot & Voice Advisor</span>
+              <span>VyaparOS AI Copilot & Voice Advisor</span>
               <span className="text-[10px] bg-teal-950 text-teal-300 px-2 py-0.5 rounded border border-teal-700/50 uppercase font-mono">
                 {briefing?.modelUsed || 'AI Reasoning Engine'}
               </span>
@@ -303,12 +303,12 @@ export function AiAdvisorPanel({
         </div>
       ) : null}
 
-      {/* Interactive "Ask Munafa AI" Bar */}
+      {/* Interactive "Ask VyaparOS AI" Bar */}
       <div className="pt-3 border-t border-white/10 space-y-2">
         <div className="flex items-center justify-between text-xs">
           <span className="font-bold text-stone-200 flex items-center gap-1.5">
             <Bot className="w-3.5 h-3.5 text-teal-400" />
-            Ask Munafa AI Copilot:
+            Ask VyaparOS AI Copilot:
           </span>
           <div className="flex flex-wrap gap-1.5 text-[10px]">
             <button

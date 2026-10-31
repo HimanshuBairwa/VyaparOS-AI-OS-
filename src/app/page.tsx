@@ -82,7 +82,7 @@ export default function Home() {
       <div className="min-h-screen bg-[#FAF9F6] flex items-center justify-center p-4">
         <div className="text-center space-y-2">
           <div className="w-8 h-8 border-2 border-teal-700 border-t-transparent rounded-full animate-spin mx-auto" />
-          <div className="text-sm font-semibold text-stone-800">Starting Munafa AI...</div>
+          <div className="text-sm font-semibold text-stone-800">Starting VyaparOS AI...</div>
           <div className="text-xs text-stone-500">Loading College Stationery Shop state</div>
         </div>
       </div>

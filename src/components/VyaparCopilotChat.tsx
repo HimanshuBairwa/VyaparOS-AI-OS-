@@ -58,6 +58,8 @@ export function VyaparCopilotChat({ onNavigateTab, availableBudgetPaise }: Vyapa
   const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const pcmChunksRef = useRef<Float32Array[]>([]);
+  const speechRecognitionRef = useRef<any>(null);
+  const liveSpeechResultRef = useRef<string>('');
 
   useEffect(() => {
     if (isOpen) {
@@ -164,7 +166,42 @@ export function VyaparCopilotChat({ onNavigateTab, availableBudgetPaise }: Vyapa
     }
 
     pcmChunksRef.current = [];
+    liveSpeechResultRef.current = '';
 
+    // 1. Try Browser Native SpeechRecognition for instant 0ms latency
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (SpeechRecognition) {
+      try {
+        const recognition = new SpeechRecognition();
+        recognition.lang = navigator.language || 'en-IN';
+        recognition.interimResults = true;
+        recognition.continuous = true;
+
+        recognition.onresult = (event: any) => {
+          let fullTranscript = '';
+          for (let i = 0; i < event.results.length; i++) {
+            fullTranscript += event.results[i][0].transcript + ' ';
+          }
+          if (fullTranscript.trim()) {
+            liveSpeechResultRef.current = fullTranscript.trim();
+            setInputText(fullTranscript.trim());
+          }
+        };
+
+        recognition.onerror = (err: any) => {
+          console.log('Speech recognition notice:', err.error);
+        };
+
+        recognition.start();
+        speechRecognitionRef.current = recognition;
+      } catch (e) {
+        console.warn('Native speech recognition start notice:', e);
+      }
+    }
+
+    // 2. Microphone stream & audio capture fallback
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioStreamRef.current = stream;
@@ -189,12 +226,24 @@ export function VyaparCopilotChat({ onNavigateTab, availableBudgetPaise }: Vyapa
       setIsRecording(true);
     } catch (err) {
       console.warn('Microphone error in chat bot:', err);
-      alert('Microphone access denied. Please type your question directly.');
+      // If browser speech was started, keep recording
+      if (speechRecognitionRef.current) {
+        setIsRecording(true);
+      } else {
+        alert('Microphone access denied. Please type your question directly.');
+      }
     }
   };
 
   const stopVoice = async () => {
     setIsRecording(false);
+
+    if (speechRecognitionRef.current) {
+      try {
+        speechRecognitionRef.current.stop();
+      } catch (_) {}
+      speechRecognitionRef.current = null;
+    }
 
     if (audioProcessorRef.current) {
       try { audioProcessorRef.current.disconnect(); } catch (_) {}
@@ -216,6 +265,13 @@ export function VyaparCopilotChat({ onNavigateTab, availableBudgetPaise }: Vyapa
     if (audioStreamRef.current) {
       audioStreamRef.current.getTracks().forEach((track) => track.stop());
       audioStreamRef.current = null;
+    }
+
+    // If browser speech recognized text, immediately submit it!
+    const liveText = liveSpeechResultRef.current.trim();
+    if (liveText && liveText.length > 1) {
+      handleSendMessage(liveText);
+      return;
     }
 
     const chunks = pcmChunksRef.current;
@@ -277,11 +333,11 @@ export function VyaparCopilotChat({ onNavigateTab, availableBudgetPaise }: Vyapa
   };
 
   const samplePrompts = [
+    'what is the margin of ball point pen',
+    'what is the margin of pen',
     'Aaj kya khareedun sabse pehle?',
     'Mera spendable budget kitna hai?',
     'Low stock items kaunse hain?',
-    'Highest profit margin kisme hai?',
-    'Supplier se negotiate kaise karun?',
   ];
 
   return (

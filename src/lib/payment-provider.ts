@@ -104,7 +104,7 @@ export class PaytmTestPaymentProvider implements PaymentProvider {
     }
 
     // Server-side checksum and order initiation payload
-    const orderId = `MUNAFA_${req.referenceId}_${Date.now()}`;
+    const orderId = `VYAPAR_${req.referenceId}_${Date.now()}`;
     const amountRupees = (req.amountPaise / 100).toFixed(2);
 
     // Official Paytm initiation contract
