@@ -23,7 +23,7 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { fixtureId, imageBase64, fileName, mimeType } = body;
+    const { fixtureId, imageBase64, fileName, mimeType, clientOcrText, currentEventType } = body;
 
     // 1. If user selected a demonstration fixture:
     if (fixtureId) {
@@ -173,21 +173,36 @@ Respond strictly with valid JSON:
         }
       }
 
-      // Attempt 2: Resilient On-Device OCR with Tesseract.js (Extracts real text from actual image)
-      let ocrText = '';
-      try {
-        const workerPath = path.join(process.cwd(), 'node_modules/tesseract.js/src/worker-script/node/index.js');
-        if (fs.existsSync(workerPath)) {
-          const worker = await createWorker('eng', 1, { workerPath });
-          const ocrResult = await worker.recognize(imageBuffer);
-          ocrText = (ocrResult.data?.text || '').trim();
-          await worker.terminate();
+      // Attempt 2: Resilient On-Device OCR with Tesseract.js or Client-Provided OCR Text
+      let ocrText = (clientOcrText || '').trim();
+      if (!ocrText) {
+        try {
+          const workerPath = path.join(process.cwd(), 'node_modules/tesseract.js/src/worker-script/node/index.js');
+          if (fs.existsSync(workerPath)) {
+            const worker = await createWorker('eng', 1, { workerPath });
+            const ocrResult = await worker.recognize(imageBuffer);
+            ocrText = (ocrResult.data?.text || '').trim();
+            await worker.terminate();
+          } else {
+            const worker = await createWorker('eng', 1);
+            const ocrResult = await worker.recognize(imageBuffer);
+            ocrText = (ocrResult.data?.text || '').trim();
+            await worker.terminate();
+          }
+        } catch (ocrErr) {
+          console.warn('Tesseract OCR fallback notice:', ocrErr);
         }
-      } catch (ocrErr) {
-        console.warn('Tesseract OCR fallback notice:', ocrErr);
       }
 
-      const lowerText = ocrText.toLowerCase();
+      // Clean common OCR misreadings of digits
+      const cleanedOcr = ocrText
+        .replace(/1[¢oO|]/g, '10')
+        .replace(/2[¢oO|]/g, '20')
+        .replace(/3[¢oO|]/g, '30')
+        .replace(/5[¢oO|]/g, '50')
+        .replace(/1[aA]/g, '10');
+
+      const lowerText = (cleanedOcr || ocrText).toLowerCase();
 
       // Parse Invoice Number
       let invoiceNumber = `INV-${Date.now().toString().slice(-6)}`;
@@ -212,22 +227,22 @@ Respond strictly with valid JSON:
       }
 
       // Parse Product Variant
-      let matchedProduct = products.find((p) => lowerText.includes(p.variant.toLowerCase()));
-      if (!matchedProduct) {
-        matchedProduct = products.find((p) => lowerText.includes(p.name.toLowerCase()));
+      let matchedProduct = null;
+      if (lowerText.includes('ball point') || lowerText.includes('ballpoint') || lowerText.includes('ball pen') || lowerText.includes('pen') || lowerText.includes('kalam')) {
+        matchedProduct = products.find((p) => p.variant.toLowerCase().includes('blue 0.7mm') || p.name.toLowerCase().includes('ballpoint') || p.name.toLowerCase().includes('pen'));
+      } else if (lowerText.includes('notebook') || lowerText.includes('copy') || lowerText.includes('ruled') || lowerText.includes('register')) {
+        matchedProduct = products.find((p) => p.name.toLowerCase().includes('notebook') || p.variant.toLowerCase().includes('a4 ruled'));
+      } else if (lowerText.includes('sketch') || lowerText.includes('a3') || lowerText.includes('drawing')) {
+        matchedProduct = products.find((p) => p.variant.toLowerCase().includes('a3 plain'));
+      } else if (lowerText.includes('charger') || lowerText.includes('cable') || lowerText.includes('gan')) {
+        matchedProduct = products.find((p) => p.name.toLowerCase().includes('charger') || p.variant.toLowerCase().includes('65w'));
+      } else if (lowerText.includes('atta') || lowerText.includes('oil') || lowerText.includes('flour')) {
+        matchedProduct = products.find((p) => p.name.toLowerCase().includes('atta') || p.variant.toLowerCase().includes('5kg'));
+      } else if (lowerText.includes('geometry') || lowerText.includes('compass')) {
+        matchedProduct = products.find((p) => p.name.toLowerCase().includes('geometry'));
       }
       if (!matchedProduct) {
-        if (lowerText.includes('pen') || lowerText.includes('ballpoint') || lowerText.includes('ball')) {
-          matchedProduct = products.find((p) => p.name.toLowerCase().includes('ballpoint') || p.name.toLowerCase().includes('pen')) || products[0];
-        } else if (lowerText.includes('notebook') || lowerText.includes('copy') || lowerText.includes('ruled')) {
-          matchedProduct = products.find((p) => p.name.toLowerCase().includes('notebook')) || products[2];
-        } else if (lowerText.includes('sketch') || lowerText.includes('a3')) {
-          matchedProduct = products.find((p) => p.variant.toLowerCase().includes('a3 plain')) || products[0];
-        } else if (lowerText.includes('geometry') || lowerText.includes('compass')) {
-          matchedProduct = products.find((p) => p.name.toLowerCase().includes('geometry')) || products[6];
-        } else {
-          matchedProduct = products[0];
-        }
+        matchedProduct = products.find((p) => lowerText.includes(p.variant.toLowerCase()) || lowerText.includes(p.name.toLowerCase())) || products[0];
       }
 
       // Parse Quantity
@@ -241,14 +256,17 @@ Respond strictly with valid JSON:
       }
 
       // Parse Unit Cost / Rate
-      let unitCostPaise = matchedProduct ? matchedProduct.recordedUnitCostPaise : 8000;
-      const rateMatch = ocrText.match(/[@xX]\s*₹?\s*(\d+(?:\.\d{1,2})?)/) ||
-                        ocrText.match(/rate\s*[:=]?\s*₹?\s*(\d+(?:\.\d{1,2})?)/i) ||
-                        ocrText.match(/price\s*[:=]?\s*₹?\s*(\d+(?:\.\d{1,2})?)/i) ||
-                        ocrText.match(/₹\s*(\d+(?:\.\d{1,2})?)/);
+      let unitCostPaise = matchedProduct ? (matchedProduct.sellingPricePaise || matchedProduct.recordedUnitCostPaise) : 1000;
+      const rateMatch =
+        cleanedOcr.match(/(?:price|rate|cost|mrp)\s*(?:of\s+[^0-9\n\r]+?\s+)?(?:is|at|=|:)?\s*₹?\s*(\d+(?:\.\d{1,2})?)/i) ||
+        cleanedOcr.match(/(?:is|at|for|=|@)\s*₹?\s*(\d+(?:\.\d{1,2})?)/i) ||
+        cleanedOcr.match(/₹\s*(\d+(?:\.\d{1,2})?)/) ||
+        cleanedOcr.match(/(\d+(?:\.\d{1,2})?)\s*(?:rs|rupees|inr|\/-)/i) ||
+        cleanedOcr.match(/\b(\d{1,4})\b/);
+
       if (rateMatch && rateMatch[1]) {
         const parsedRate = parseFloat(rateMatch[1]);
-        if (parsedRate > 0 && parsedRate < 10000) {
+        if (parsedRate > 0 && parsedRate < 50000) {
           unitCostPaise = Math.round(parsedRate * 100);
         }
       }
@@ -270,12 +288,12 @@ Respond strictly with valid JSON:
       }
 
       // Determine Event Type
-      const isSale = lowerText.includes('cash memo') || lowerText.includes('retail sale') || lowerText.includes('sold to');
-      const eventType = isSale ? 'SALE' : 'QUOTE';
+      const isSale = lowerText.includes('cash memo') || lowerText.includes('retail sale') || lowerText.includes('sold') || lowerText.includes('customer') || currentEventType === 'SALE';
+      const eventType = currentEventType ? currentEventType : (isSale ? 'SALE' : 'QUOTE');
 
-      const hasLegibleText = ocrText.length > 8;
+      const hasLegibleText = ocrText.length > 3;
       const humanizedNote = hasLegibleText
-        ? `Scanned via On-Device OCR: Found "${ocrText.slice(0, 80).replace(/[\r\n]+/g, ' ')}...". Values loaded into editable fields below.`
+        ? `Scanned from photo: "${cleanedOcr.slice(0, 100).replace(/[\r\n]+/g, ' ')}". All values populated for review.`
         : `Photo captured (${fileName || 'Camera viewfinder'}). Text was faint; editable draft prepared for merchant confirmation.`;
 
       return NextResponse.json({

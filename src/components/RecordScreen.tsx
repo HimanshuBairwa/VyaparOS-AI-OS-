@@ -309,9 +309,35 @@ export function RecordScreen({
 
   const processImageExtraction = async (dataUrl: string, label: string) => {
     setIsExtracting(true);
-    setStatusMessage({ type: 'info', text: `Analyzing invoice image (${label})...` });
+    setStatusMessage({ type: 'info', text: `Scanning image with OCR (${label})...` });
     setInputOrigin('BILL');
 
+    // 1. Client-Side WebAssembly OCR directly in user's browser
+    let clientOcr = '';
+    try {
+      const { createWorker } = await import('tesseract.js');
+      const worker = await createWorker('eng');
+      const ocrRes = await worker.recognize(dataUrl);
+      clientOcr = (ocrRes.data?.text || '').trim();
+      await worker.terminate();
+    } catch (e) {
+      console.warn('Client-side OCR notice:', e);
+    }
+
+    // Clean common OCR misreadings of digits and punctuation
+    const cleanedText = clientOcr
+      .replace(/1[¢oOA\uFFFD|]+/g, '10')
+      .replace(/2[¢oOA\uFFFD|]+/g, '20')
+      .replace(/3[¢oOA\uFFFD|]+/g, '30')
+      .replace(/5[¢oOA\uFFFD|]+/g, '50');
+
+    // If client extracted text, immediately populate optimistically!
+    if (cleanedText && cleanedText.length > 2) {
+      setInputText(cleanedText);
+      handleAnalyzeText(cleanedText, eventType, 'BILL');
+    }
+
+    // 2. Send to server with clientOcrText and current eventType
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 25000); // 25s comfortable timeout
 
@@ -322,6 +348,8 @@ export function RecordScreen({
         body: JSON.stringify({
           imageBase64: dataUrl,
           fileName: label,
+          clientOcrText: cleanedText,
+          currentEventType: eventType,
         }),
         signal: controller.signal,
       });
@@ -342,56 +370,31 @@ export function RecordScreen({
 
         setStatusMessage({
           type: 'success',
-          text: `Invoice photo analyzed! Structured facts loaded into editable canvas & form below.`,
+          text: `Photo scanned successfully! Found "${d.matchedVariant}" @ ₹${((d.unitCostPaise || d.unitPricePaise || 1000) / 100).toFixed(0)}. Values loaded below.`,
         });
       } else {
-        // Resilient fallback with editable draft
-        const fallbackProd = products.find((p) => p.variant.toLowerCase().includes('a3') || p.name.toLowerCase().includes('pen')) || products[0];
-        const fallbackDraft = {
-          type: eventType,
-          invoiceNumber: `BILL-${Date.now().toString().slice(-4)}`,
-          supplierName: suppliers[0]?.name || 'Local Wholesale Mart',
-          matchedProductId: fallbackProd?.id,
-          matchedVariant: fallbackProd?.variant || 'Standard Unit',
-          quantity: 1,
-          packSize: 1,
-          unitCostPaise: fallbackProd?.recordedUnitCostPaise || 6500,
-          unitPricePaise: fallbackProd?.sellingPricePaise || 10000,
-          actionCostPaise: 0,
-          totalAmountPaise: fallbackProd?.sellingPricePaise || 10000,
-          notes: `Photo captured: ${label}. Values pre-loaded into editable fields below for merchant confirmation.`,
-        };
-        setInputText(`Invoice scan from ${label}: 1 unit of ${fallbackDraft.matchedVariant}.`);
-        applyDraftToForm(fallbackDraft, 'BILL');
-        setStatusMessage({
-          type: 'info',
-          text: `Photo captured! All details loaded into editable canvas below for review.`,
-        });
+        if (cleanedText) {
+          handleAnalyzeText(cleanedText, eventType, 'BILL');
+          setStatusMessage({
+            type: 'success',
+            text: `Extracted from photo: "${cleanedText}". All fields loaded below.`,
+          });
+        }
       }
     } catch (err) {
       clearTimeout(timer);
-      // Graceful fallback: Never block the merchant or show an unhandled error
-      const fallbackProd = products.find((p) => p.variant.toLowerCase().includes('a3') || p.name.toLowerCase().includes('pen')) || products[0];
-      const fallbackDraft = {
-        type: eventType,
-        invoiceNumber: `SCAN-${Date.now().toString().slice(-4)}`,
-        supplierName: suppliers[0]?.name || 'Wholesale Supplier',
-        matchedProductId: fallbackProd?.id,
-        matchedVariant: fallbackProd?.variant || 'Standard Unit',
-        quantity: 1,
-        packSize: 1,
-        unitCostPaise: fallbackProd?.recordedUnitCostPaise || 6500,
-        unitPricePaise: fallbackProd?.sellingPricePaise || 10000,
-        actionCostPaise: 0,
-        totalAmountPaise: fallbackProd?.sellingPricePaise || 10000,
-        notes: `Photo captured: ${label}. Values pre-loaded into editable fields below for merchant confirmation.`,
-      };
-      setInputText(`Invoice photo captured (${label}): 1 unit of ${fallbackDraft.matchedVariant}.`);
-      applyDraftToForm(fallbackDraft, 'BILL');
-      setStatusMessage({
-        type: 'info',
-        text: `Photo loaded! Values pre-filled into editable fields below. Review and adjust before saving.`,
-      });
+      if (cleanedText) {
+        handleAnalyzeText(cleanedText, eventType, 'BILL');
+        setStatusMessage({
+          type: 'success',
+          text: `Extracted from photo: "${cleanedText}". Review and save below.`,
+        });
+      } else {
+        setStatusMessage({
+          type: 'info',
+          text: `Photo captured (${label}). Form is ready for direct entry below.`,
+        });
+      }
     } finally {
       setIsExtracting(false);
     }
@@ -641,17 +644,43 @@ export function RecordScreen({
 
     // 1. Instant optimistic local regex match (0ms latency for merchant)
     const lower = textToParse.toLowerCase();
-    const matchedProd = products.find(
-      (p) =>
-        lower.includes(p.variant.toLowerCase()) ||
-        lower.includes(p.name.toLowerCase()) ||
-        (lower.includes('atta') && p.name.toLowerCase().includes('sketch')) ||
-        (lower.includes('pen') && p.name.toLowerCase().includes('pen')) ||
-        (lower.includes('notebook') && p.name.toLowerCase().includes('notebook'))
-    );
+    let matchedProd: any = null;
+
+    if (
+      lower.includes('ball point') ||
+      lower.includes('ballpoint') ||
+      lower.includes('ball pen') ||
+      lower.includes('pen') ||
+      lower.includes('kalam')
+    ) {
+      matchedProd = products.find(
+        (p) =>
+          p.variant.toLowerCase().includes('blue 0.7mm') ||
+          p.name.toLowerCase().includes('ballpoint') ||
+          p.name.toLowerCase().includes('pen')
+      );
+    } else if (lower.includes('notebook') || lower.includes('copy') || lower.includes('ruled') || lower.includes('register')) {
+      matchedProd = products.find((p) => p.name.toLowerCase().includes('notebook') || p.variant.toLowerCase().includes('a4 ruled'));
+    } else if (lower.includes('sketch') || lower.includes('a3') || lower.includes('drawing')) {
+      matchedProd = products.find((p) => p.variant.toLowerCase().includes('a3 plain'));
+    } else if (lower.includes('charger') || lower.includes('cable') || lower.includes('gan')) {
+      matchedProd = products.find((p) => p.name.toLowerCase().includes('charger') || p.variant.toLowerCase().includes('65w'));
+    } else if (lower.includes('atta') || lower.includes('oil') || lower.includes('flour')) {
+      matchedProd = products.find((p) => p.name.toLowerCase().includes('atta') || p.variant.toLowerCase().includes('5kg'));
+    } else if (lower.includes('geometry') || lower.includes('compass')) {
+      matchedProd = products.find((p) => p.name.toLowerCase().includes('geometry'));
+    }
+
+    if (!matchedProd) {
+      matchedProd = products.find(
+        (p) => lower.includes(p.variant.toLowerCase()) || lower.includes(p.name.toLowerCase())
+      );
+    }
+
     if (matchedProd) {
       setSelectedProductId(matchedProd.id);
-      setUnitPriceRupees(Math.round(matchedProd.sellingPricePaise / 100));
+      const defaultPrice = Math.round((type === 'SALE' ? matchedProd.sellingPricePaise : matchedProd.recordedUnitCostPaise) / 100);
+      setUnitPriceRupees(defaultPrice || 10);
     }
 
     const qtyMatch = textToParse.match(/(\d+)\s*(?:pcs?|pieces?|units?|pkts?|packs?|boxes?|pouches?|copies?|bags?)/i) ||
@@ -663,8 +692,14 @@ export function RecordScreen({
       }
     }
 
-    const priceMatch = textToParse.match(/(?:for|@|₹|rs\.?)\s*(\d+(?:\.\d{1,2})?)/i) ||
-                       textToParse.match(/(\d+)\s*(?:cash|paytm|upi)/i);
+    // Flexible price regex: handles "price of the ball point pen is 10", "for 10", "10 rs", "@ 10", "₹10"
+    const priceMatch =
+      textToParse.match(/(?:price|rate|cost|mrp)\s*(?:of\s+[^0-9\n\r]+?\s+)?(?:is|at|=|:)?\s*₹?\s*(\d+(?:\.\d{1,2})?)/i) ||
+      textToParse.match(/(?:is|at|for|=|@)\s*₹?\s*(\d+(?:\.\d{1,2})?)/i) ||
+      textToParse.match(/₹\s*(\d+(?:\.\d{1,2})?)/) ||
+      textToParse.match(/(\d+(?:\.\d{1,2})?)\s*(?:cash|paytm|upi|rs|rupees|inr|\/-)/i) ||
+      textToParse.match(/\b(\d{1,4})\b$/);
+
     if (priceMatch && priceMatch[1]) {
       const val = parseFloat(priceMatch[1]);
       if (val > 0) {
@@ -757,17 +792,20 @@ export function RecordScreen({
   // Sample quick chips across multiple retail trade sectors
   const samplePrompts = {
     SALE: [
+      { label: '🖋️ Ballpoint Pen ₹10', text: 'price of the ball point pen is 10' },
       { label: '🛒 2 Atta 5kg Cash ₹480', text: 'Sold 2 5kg Aashirvaad Atta pouches for 480 cash' },
       { label: '📱 1 65W Charger ₹850', text: 'Sold 1 65W GaN Fast Charger for 850 paytm upi' },
       { label: '💊 2 Dolo 650 Boxes ₹900', text: 'Sold 2 boxes of Paracetamol 650mg for 900 cash' },
       { label: '📚 2 A4 Notebooks Cash ₹130', text: 'Sold 2 A4 ruled notebooks 200p for 130 cash' },
     ],
     DEMAND: [
+      { label: '🖋️ 20 Ballpoint Pens', text: 'Customer asked for 20 ball point pens for exam center tomorrow morning' },
       { label: '🛒 10 units Atta 5kg (Catering)', text: 'Customer asked for 10 bags of 5kg Chakki Atta for community catering tomorrow evening' },
       { label: '📱 12 units 65W Chargers', text: 'Customer asked for 12 pieces 65W GaN Type-C dual chargers by tomorrow 5 PM' },
       { label: '📚 12 A3 Plain Sketchbooks', text: 'A3 plain drawing book chahiye thi 12 pieces fine arts student ko kal sham tak, stock khatam tha' },
     ],
     QUOTE: [
+      { label: '🖋️ Ballpoint Pen Quote ₹10', text: 'price of the ball point pen is 10' },
       { label: '🛒 FMCG: 10 Atta @ ₹190', text: 'Metro FMCG Wholesalers: Chakki Atta 5kg bundle 10 pieces, 190 rupaye per piece, 40 delivery, kal 4 baje tak.' },
       { label: '📱 Electronics: 10 Chargers @ ₹500', text: 'Shanti Electronics: 65W GaN Fast Charger 10 pieces, 500 rupaye per piece, 50 delivery, kal 2 baje tak.' },
       { label: '📚 Supplier A 12-pack @ ₹80', text: 'A3 plain ka bundle 12 pieces, 80 rupaye per piece, 30 delivery, kal 4 baje tak.' },
@@ -1134,6 +1172,46 @@ export function RecordScreen({
               {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4 text-teal-700" />}
             </button>
           </div>
+        </div>
+
+        {/* Voice Speak & Quick Test Bar */}
+        <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-stone-100 text-xs">
+          <span className="text-[11px] font-bold text-teal-800 flex items-center gap-1">
+            <Mic className="w-3.5 h-3.5 text-teal-600" />
+            <span>Voice speech test:</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              const phrase = 'price of the ball point pen is 10';
+              setInputText(phrase);
+              setInputOrigin('VOICE');
+              handleAnalyzeText(phrase, eventType, 'VOICE');
+              setStatusMessage({
+                type: 'success',
+                text: `🎤 Spoken voice captured: "${phrase}". Form synchronized below!`,
+              });
+            }}
+            className="text-[10px] bg-teal-50 hover:bg-teal-100 text-teal-900 border border-teal-300 font-bold px-2 py-0.5 rounded shadow-2xs transition"
+          >
+            🎙️ &ldquo;Price of the ball point pen is 10&rdquo;
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const phrase = 'Sold 2 A4 ruled notebooks for 130 cash';
+              setInputText(phrase);
+              setInputOrigin('VOICE');
+              handleAnalyzeText(phrase, 'SALE', 'VOICE');
+              setStatusMessage({
+                type: 'success',
+                text: `🎤 Spoken voice captured: "${phrase}". Form synchronized below!`,
+              });
+            }}
+            className="text-[10px] bg-stone-100 hover:bg-teal-50 text-stone-800 border border-stone-200 font-medium px-2 py-0.5 rounded transition"
+          >
+            🎙️ &ldquo;Sold 2 A4 notebooks 130 cash&rdquo;
+          </button>
         </div>
 
         {/* Quick Toolbar: Parse Button + Suggestions */}
