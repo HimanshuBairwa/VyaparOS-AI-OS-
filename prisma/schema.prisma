@@ -1,0 +1,268 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Merchant {
+  id                      String          @id @default(cuid())
+  name                    String          @default("College Corner Stationery")
+  tagline                 String          @default("Aaj kya khareedun, kitna, aur kyun?")
+  category                String          @default("stationery")
+  currency                String          @default("INR")
+  availableBudgetPaise    Int             @default(100000) // ₹1,000.00
+  minContributionPaise    Int             @default(15000)  // ₹150.00
+  maxSpeculativeUnits     Int             @default(0)      // Policy: default 0 speculative
+  maxSpeculativeCostPaise Int             @default(0)
+  createdAt               DateTime        @default(now())
+  updatedAt               DateTime        @updatedAt
+
+  products                Product[]
+  suppliers               Supplier[]
+  sales                   Sale[]
+  stockMovements          StockMovement[]
+  demandRequests          DemandRequest[]
+  supplierQuotes          SupplierQuote[]
+  proposals               Proposal[]
+  purchaseOrders          PurchaseOrder[]
+  paymentEvents           PaymentEvent[]
+  sourceDocuments         SourceDocument[]
+}
+
+model Product {
+  id                    String          @id @default(cuid())
+  merchantId            String
+  merchant              Merchant        @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  name                  String          // e.g. "Sketchbook", "Notebook", "Chart Paper"
+  variant               String          // e.g. "A3 Plain", "A4 Ruled 200p", "A4 Plain 100p"
+  size                  String          // "A3", "A4", etc.
+  ruling                String          // "Plain", "Ruled", "Grid"
+  packType              String          @default("Unit") // "Unit", "Pack of 6", "Pack of 12"
+  packQuantity          Int             @default(1)
+  sku                   String          @unique
+  sellingPricePaise     Int             // e.g. 12000 = ₹120.00
+  recordedUnitCostPaise Int             // e.g. 8000 = ₹80.00
+  onHandQuantity        Int             @default(0)
+  reservedQuantity      Int             @default(0)
+  reorderThreshold      Int             @default(5)
+  lastPhysicalCountDate DateTime?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  stockMovements        StockMovement[]
+  saleLines             SaleLine[]
+  demandRequests        DemandRequest[]
+  supplierQuotes        SupplierQuote[]
+  proposals             Proposal[]
+  purchaseOrders        PurchaseOrder[]
+}
+
+model StockMovement {
+  id                String    @id @default(cuid())
+  merchantId        String
+  merchant          Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  productId         String
+  product           Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  type              String    // OPENING, PURCHASE_RECEIPT, SALE, CUSTOMER_RETURN, SUPPLIER_RETURN, DAMAGE, DISCARD, PHYSICAL_COUNT_CORRECTION
+  quantityDelta     Int       // positive or negative
+  resultingOnHand   Int
+  unitCostPaise     Int?
+  sourceType        String    // MANUAL, SALE, PURCHASE_ORDER, AUDIT
+  sourceReferenceId String?
+  notes             String?
+  createdAt         DateTime  @default(now())
+}
+
+model SourceDocument {
+  id               String    @id @default(cuid())
+  merchantId       String
+  merchant         Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  documentType     String    // BILL_IMAGE, AUDIO_NOTE, TEXT_PASTE, API_PAYMENT
+  rawContent       String?
+  fileUrl          String?
+  extractedPayload String?   // JSON
+  checksum         String?
+  status           String    @default("DRAFT_EXTRACTED") // DRAFT_EXTRACTED, CONFIRMED, DISCARDED, FAILED
+  errorMessage     String?
+  createdAt        DateTime  @default(now())
+
+  sales            Sale[]
+  supplierQuotes   SupplierQuote[]
+}
+
+model Sale {
+  id               String          @id @default(cuid())
+  merchantId       String
+  merchant         Merchant        @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  saleNumber       String          @unique
+  totalAmountPaise Int
+  paymentStatus    String          @default("PAID") // PAID, PENDING, DUE
+  paymentMethod    String          @default("CASH") // CASH, UPI_PAYTM, KHATA_DUE
+  sourceDocumentId String?
+  sourceDocument   SourceDocument? @relation(fields: [sourceDocumentId], references: [id])
+  notes            String?
+  idempotencyKey   String?         @unique
+  createdAt        DateTime        @default(now())
+
+  lines            SaleLine[]
+}
+
+model SaleLine {
+  id             String   @id @default(cuid())
+  saleId         String
+  sale           Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity       Int
+  unitPricePaise Int
+  subtotalPaise  Int
+}
+
+model DemandRequest {
+  id                 String    @id @default(cuid())
+  merchantId         String
+  merchant           Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  productId          String?
+  product            Product?  @relation(fields: [productId], references: [id])
+  rawItemDescription String
+  variant            String?
+  quantity           Int
+  requiredBy         DateTime?
+  failureReason      String    // OUT_OF_STOCK, INSUFFICIENT_QUANTITY, NOT_STOCKED, PRICE_UNMATCHED
+  source             String    // WALK_IN, PHONE, WHATSAPP_PASTE
+  confirmationState  String    @default("CONFIRMED_COMMITMENT") // ENQUIRY, CONFIRMED_COMMITMENT
+  customerName       String?
+  customerContact    String?
+  advanceAmountPaise Int       @default(0)
+  status             String    @default("PENDING") // PENDING, FULFILLED, CANCELLED, EXPIRED
+  idempotencyKey     String?   @unique
+  createdAt          DateTime  @default(now())
+
+  proposals          Proposal[]
+}
+
+model Supplier {
+  id                String          @id @default(cuid())
+  merchantId        String
+  merchant          Merchant        @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  name              String          // "Supplier A (Stationery Hub)", "Supplier B (Metro Papers)"
+  contact           String?
+  deliveryLeadHours Int             @default(4)
+  createdAt         DateTime        @default(now())
+
+  quotes            SupplierQuote[]
+  purchaseOrders    PurchaseOrder[]
+}
+
+model SupplierQuote {
+  id                String          @id @default(cuid())
+  merchantId        String
+  merchant          Merchant        @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  supplierId        String
+  supplier          Supplier        @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  productId         String
+  product           Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant           String
+  unitCostPaise     Int             // e.g. 8000 = ₹80.00
+  packSize          Int             @default(1)
+  minOrderQuantity  Int             @default(1)
+  availableQuantity Int             @default(12)
+  actionCostPaise   Int             @default(3000) // ₹30 delivery/action cost
+  deliveryLeadHours Int             @default(4)
+  validUntil        DateTime
+  notes             String?
+  sourceDocumentId  String?
+  sourceDocument    SourceDocument? @relation(fields: [sourceDocumentId], references: [id])
+  createdAt         DateTime        @default(now())
+
+  proposals         Proposal[]
+}
+
+model Proposal {
+  id                         String         @id @default(cuid())
+  merchantId                 String
+  merchant                   Merchant       @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  productId                  String
+  product                    Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  supplierId                 String?
+  supplierQuoteId            String?
+  supplierQuote              SupplierQuote? @relation(fields: [supplierQuoteId], references: [id])
+  demandRequestId            String?
+  demandRequest              DemandRequest? @relation(fields: [demandRequestId], references: [id])
+  proposedQuantity           Int
+  packSize                   Int
+  unitCostPaise              Int
+  actionCostPaise            Int
+  purchaseOutflowPaise       Int
+  projectedRevenuePaise      Int
+  projectedContributionPaise Int
+  scenarioBreakdownJson      String         // JSON for no-sale, confirmed-complete, full-sell-through
+  blockersJson               String?        // JSON array of blocker strings
+  status                     String         @default("FEASIBLE") // FEASIBLE, NO_FEASIBLE_OPTION, APPROVED, DISMISSED, SUPERSEDED
+  inputSnapshotHash          String
+  createdAt                  DateTime       @default(now())
+
+  purchaseOrders             PurchaseOrder[]
+}
+
+model PurchaseOrder {
+  id                String    @id @default(cuid())
+  proposalId        String?
+  proposal          Proposal? @relation(fields: [proposalId], references: [id])
+  merchantId        String
+  merchant          Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  supplierId        String
+  supplier          Supplier  @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  productId         String
+  product           Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  poNumber          String    @unique
+  orderedQuantity   Int
+  unitCostPaise     Int
+  actionCostPaise   Int
+  totalOutflowPaise Int
+  status            String    @default("ISSUED") // ISSUED, STOCK_RECEIVED, COMPLETED, CANCELLED
+  receivedQuantity  Int       @default(0)
+  receivedAt        DateTime?
+  paymentStatus     String    @default("UNPAID") // UNPAID, PAID
+  notes             String?
+  createdAt         DateTime  @default(now())
+
+  outcomes          Outcome[]
+}
+
+model PaymentEvent {
+  id             String    @id @default(cuid())
+  merchantId     String
+  merchant       Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  provider       String    @default("SIMULATED") // SIMULATED, PAYTM_TEST
+  direction      String    // INBOUND_SALE, OUTBOUND_PURCHASE
+  amountPaise    Int
+  referenceType  String    // SALE, PURCHASE_ORDER
+  referenceId    String
+  transactionId  String    @unique
+  status         String    @default("SUCCESS") // PENDING, SUCCESS, FAILED
+  isSettled      Boolean   @default(false)
+  settledAt      DateTime?
+  idempotencyKey String    @unique
+  payloadJson    String?
+  createdAt      DateTime  @default(now())
+}
+
+model Outcome {
+  id                     String        @id @default(cuid())
+  purchaseOrderId        String
+  purchaseOrder          PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  plannedQuantity        Int
+  actualQuantityReceived Int           @default(0)
+  actualQuantitySold     Int           @default(0)
+  actualRevenuePaise     Int           @default(0)
+  actualCostPaise        Int           @default(0)
+  actualContributionPaise Int          @default(0)
+  remainingStockQuantity Int           @default(0)
+  cancellationCount      Int           @default(0)
+  notes                  String?
+  updatedAt              DateTime      @updatedAt
+}
